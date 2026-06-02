@@ -1,4 +1,4 @@
-const CACHE_NAME = "havells-price-finder-v1";
+const CACHE_NAME = "havells-price-finder-v2";
 
 const FILES_TO_CACHE = [
   "index.html",

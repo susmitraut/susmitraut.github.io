@@ -91,3 +91,41 @@ button {
 .preview-table th {
   background: #f3f4f6;
 }
+
+.table-scroll {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.preview-table {
+  min-width: 700px;
+}
+
+.details-table-box {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.details-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 10px;
+  font-size: 14px;
+}
+
+.details-table th,
+.details-table td {
+  border: 1px solid #ddd;
+  padding: 8px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.details-table th {
+  width: 40%;
+  background: #f3f4f6;
+}
+
+.details-table td {
+  width: 60%;
+}

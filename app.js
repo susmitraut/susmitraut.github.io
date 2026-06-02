@@ -4,6 +4,8 @@ let pendingRows = [];
 let pendingFileName = "";
 let pendingHeaders = [];
 
+document.getElementById("excelFile").addEventListener("change", handleExcelUpload);
+
 function normalizeCode(code) {
   return String(code || "")
     .trim()
@@ -14,11 +16,18 @@ function normalizeCode(code) {
 function cleanPrice(price) {
   return String(price || "")
     .replace("₹", "")
-    .replace(",", "")
+    .replace(/,/g, "")
     .trim();
 }
 
-document.getElementById("excelFile").addEventListener("change", handleExcelUpload);
+function escapeHTML(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
 
 function handleExcelUpload(event) {
   const file = event.target.files[0];
@@ -38,16 +47,34 @@ function handleExcelUpload(event) {
     const firstSheetName = workbook.SheetNames[0];
     const worksheet = workbook.Sheets[firstSheetName];
 
-    const rows = XLSX.utils.sheet_to_json(worksheet, { defval: "" });
+    const sheetRows = XLSX.utils.sheet_to_json(worksheet, {
+      header: 1,
+      defval: "",
+      raw: false
+    });
 
-    if (rows.length === 0) {
+    if (sheetRows.length === 0) {
       alert("Excel file is empty.");
       return;
     }
 
-    pendingRows = rows;
+    const headerRowIndex = findHeaderRowIndex(sheetRows);
+    const headerRow = sheetRows[headerRowIndex];
+
+    pendingHeaders = makeUniqueHeaders(headerRow);
+
+    const dataRows = sheetRows
+      .slice(headerRowIndex + 1)
+      .filter(row => row.some(cell => String(cell).trim() !== ""));
+
+    pendingRows = dataRows.map(row => convertArrayRowToObject(row, pendingHeaders));
+
+    if (pendingRows.length === 0) {
+      alert("No product rows found after the header row.");
+      return;
+    }
+
     pendingFileName = file.name;
-    pendingHeaders = Object.keys(rows[0]);
 
     saveExcelDataForFutureMapping();
 
@@ -57,13 +84,98 @@ function handleExcelUpload(event) {
   reader.readAsArrayBuffer(file);
 }
 
+function findHeaderRowIndex(sheetRows) {
+  const knownHeaderWords = [
+    "product code",
+    "sku",
+    "sku code",
+    "item code",
+    "material code",
+    "code",
+    "list price",
+    "price",
+    "mrp",
+    "product name",
+    "description",
+    "item name"
+  ];
+
+  let bestIndex = 0;
+  let bestScore = -1;
+
+  const maxRowsToCheck = Math.min(sheetRows.length, 15);
+
+  for (let i = 0; i < maxRowsToCheck; i++) {
+    const row = sheetRows[i];
+
+    const nonEmptyCells = row.filter(cell => String(cell).trim() !== "").length;
+
+    if (nonEmptyCells < 2) {
+      continue;
+    }
+
+    let knownMatchCount = 0;
+
+    row.forEach(cell => {
+      const cellText = String(cell).toLowerCase().trim();
+
+      if (knownHeaderWords.includes(cellText)) {
+        knownMatchCount++;
+      }
+    });
+
+    const score = knownMatchCount * 10 + nonEmptyCells;
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestIndex = i;
+    }
+  }
+
+  return bestIndex;
+}
+
+function makeUniqueHeaders(headerRow) {
+  const headers = [];
+  const usedHeaders = {};
+
+  headerRow.forEach((cell, index) => {
+    let header = String(cell || "").trim();
+
+    if (!header) {
+      header = "Column " + (index + 1);
+    }
+
+    if (usedHeaders[header]) {
+      usedHeaders[header]++;
+      header = header + " (" + usedHeaders[header] + ")";
+    } else {
+      usedHeaders[header] = 1;
+    }
+
+    headers.push(header);
+  });
+
+  return headers;
+}
+
+function convertArrayRowToObject(row, headers) {
+  const obj = {};
+
+  headers.forEach((header, index) => {
+    obj[header] = row[index] !== undefined ? row[index] : "";
+  });
+
+  return obj;
+}
+
 function saveExcelDataForFutureMapping() {
   try {
     localStorage.setItem("lastExcelRowsForMapping", JSON.stringify(pendingRows));
     localStorage.setItem("lastExcelHeadersForMapping", JSON.stringify(pendingHeaders));
     localStorage.setItem("lastExcelFileNameForMapping", pendingFileName);
   } catch (error) {
-    alert("Excel file is too large to save for future mapping. You may need to upload it again next time.");
+    alert("Excel file has too much data to save locally. You can still use it now, but may need to upload again next time.");
   }
 }
 
@@ -73,13 +185,17 @@ function loadExcelDataForFutureMapping() {
   const savedFileName = localStorage.getItem("lastExcelFileNameForMapping");
 
   if (savedRows && savedHeaders) {
-    pendingRows = JSON.parse(savedRows);
-    pendingHeaders = JSON.parse(savedHeaders);
-    pendingFileName = savedFileName || "Previous Excel File";
+    try {
+      pendingRows = JSON.parse(savedRows);
+      pendingHeaders = JSON.parse(savedHeaders);
+      pendingFileName = savedFileName || "Previous Excel File";
 
-    showColumnMappingScreen();
+      showColumnMappingScreen();
 
-    return true;
+      return true;
+    } catch (error) {
+      return false;
+    }
   }
 
   return false;
@@ -195,11 +311,12 @@ function showPreview() {
 
   const firstFiveRows = pendingRows.slice(0, 5);
 
-  let html = "<table class='preview-table'>";
+  let html = "<div class='table-scroll'>";
+  html += "<table class='preview-table'>";
   html += "<tr>";
 
   pendingHeaders.forEach(header => {
-    html += "<th>" + header + "</th>";
+    html += "<th>" + escapeHTML(header) + "</th>";
   });
 
   html += "</tr>";
@@ -208,13 +325,14 @@ function showPreview() {
     html += "<tr>";
 
     pendingHeaders.forEach(header => {
-      html += "<td>" + row[header] + "</td>";
+      html += "<td>" + escapeHTML(row[header]) + "</td>";
     });
 
     html += "</tr>";
   });
 
   html += "</table>";
+  html += "</div>";
 
   previewBox.innerHTML = html;
 }
@@ -279,7 +397,8 @@ function importRows(productCodeColumn, priceColumn, productNameColumn) {
       productCodeOriginal: String(productCode).trim(),
       productCodeNormalized: normalizedCode,
       productName: String(productName || "").trim(),
-      listPrice: cleanedPrice
+      listPrice: cleanedPrice,
+      allProductDetails: row
     });
   });
 
@@ -294,7 +413,7 @@ function importRows(productCodeColumn, priceColumn, productNameColumn) {
     invalidPriceRows + " invalid price rows, " +
     duplicateRows + " duplicate rows.";
 
-  alert("Price list imported successfully. Dropdown will remain visible.");
+  alert("Price list imported successfully. All product columns will now show in search result.");
 }
 
 function searchSku() {
@@ -316,9 +435,11 @@ function searchSku() {
   if (result) {
     resultBox.innerHTML =
       "<h2>Product Found</h2>" +
-      "<p><strong>Product Code:</strong> " + result.productCodeOriginal + "</p>" +
-      "<p><strong>Product Name:</strong> " + (result.productName || "Not available") + "</p>" +
-      "<p><strong>List Price:</strong> ₹" + result.listPrice + "</p>";
+      "<p><strong>Product Code:</strong> " + escapeHTML(result.productCodeOriginal) + "</p>" +
+      "<p><strong>Product Name:</strong> " + escapeHTML(result.productName || "Not available") + "</p>" +
+      "<p><strong>List Price:</strong> ₹" + escapeHTML(result.listPrice) + "</p>" +
+      "<h3>All Product Details</h3>" +
+      createProductDetailsTable(result.allProductDetails);
   } else {
     resultBox.innerHTML =
       "<h2>No Exact Match Found</h2>" +
@@ -326,20 +447,47 @@ function searchSku() {
   }
 }
 
+function createProductDetailsTable(productDetails) {
+  if (!productDetails) {
+    return "<p>No extra details available.</p>";
+  }
+
+  let html = "<div class='details-table-box'>";
+  html += "<table class='details-table'>";
+
+  Object.keys(productDetails).forEach(key => {
+    const value = productDetails[key];
+
+    html += "<tr>";
+    html += "<th>" + escapeHTML(key) + "</th>";
+    html += "<td>" + escapeHTML(value || "-") + "</td>";
+    html += "</tr>";
+  });
+
+  html += "</table>";
+  html += "</div>";
+
+  return html;
+}
+
 window.onload = function() {
   const savedData = localStorage.getItem("skuDatabase");
   const fileName = localStorage.getItem("importFileName");
 
   if (savedData) {
-    skuDatabase = JSON.parse(savedData);
+    try {
+      skuDatabase = JSON.parse(savedData);
 
-    document.getElementById("importStatus").innerText =
-      "Loaded " + skuDatabase.length + " SKUs from " + fileName + ".";
+      document.getElementById("importStatus").innerText =
+        "Loaded " + skuDatabase.length + " SKUs from " + fileName + ".";
+    } catch (error) {
+      skuDatabase = [];
+    }
   }
 
   const mappingLoaded = loadExcelDataForFutureMapping();
 
-  if (!mappingLoaded) {
+  if (!mappingLoaded && !savedData) {
     document.getElementById("importStatus").innerText =
       "No Excel file loaded yet. Please upload a price list.";
   }
