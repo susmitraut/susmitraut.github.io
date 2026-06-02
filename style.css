@@ -1,0 +1,93 @@
+body {
+  margin: 0;
+  font-family: Arial, sans-serif;
+  background: #f3f4f6;
+}
+
+.app {
+  max-width: 480px;
+  margin: auto;
+  padding: 16px;
+}
+
+h1 {
+  margin-bottom: 4px;
+  color: #222;
+}
+
+.subtitle {
+  margin-top: 0;
+  color: #666;
+}
+
+.card {
+  background: white;
+  padding: 16px;
+  margin-top: 16px;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+}
+
+.hidden {
+  display: none;
+}
+
+label {
+  display: block;
+  margin-top: 12px;
+  margin-bottom: 6px;
+  font-weight: bold;
+}
+
+input[type="text"] {
+  width: 100%;
+  padding: 14px;
+  font-size: 18px;
+  box-sizing: border-box;
+  margin-bottom: 12px;
+}
+
+input[type="file"] {
+  width: 100%;
+}
+
+select {
+  width: 100%;
+  padding: 12px;
+  font-size: 16px;
+  box-sizing: border-box;
+  margin-bottom: 10px;
+}
+
+button {
+  width: 100%;
+  padding: 14px;
+  font-size: 18px;
+  background: #d71920;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  margin-top: 12px;
+}
+
+.result-card {
+  min-height: 120px;
+}
+
+.preview-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  margin-top: 8px;
+}
+
+.preview-table th,
+.preview-table td {
+  border: 1px solid #ddd;
+  padding: 6px;
+  text-align: left;
+}
+
+.preview-table th {
+  background: #f3f4f6;
+}

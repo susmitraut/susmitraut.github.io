@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Havells Price Finder</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <link rel="manifest" href="manifest.json">
+  <link rel="stylesheet" href="style.css">
+
+  <!-- SheetJS library for reading Excel -->
+  <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
+</head>
+
+<body>
+  <div class="app">
+    <h1>Price Finder</h1>
+    <p class="subtitle">Search Product Code and get List Price</p>
+
+    <div class="card">
+      <h2>1. Import Price List</h2>
+      <input type="file" id="excelFile" accept=".xlsx,.xls">
+      <p id="importStatus">No file imported yet.</p>
+    </div>
+
+    <div class="card hidden" id="mappingSection">
+      <h2>2. Map Excel Columns</h2>
+
+      <label>Product Code / SKU Column</label>
+      <select id="productCodeSelect"></select>
+
+      <label>List Price Column</label>
+      <select id="priceSelect"></select>
+
+      <label>Product Name Column Optional</label>
+      <select id="productNameSelect"></select>
+
+      <button onclick="confirmColumnMapping()">Confirm Import</button>
+
+      <h3>Preview</h3>
+      <div id="previewBox"></div>
+    </div>
+
+    <div class="card">
+      <h2>3. Search SKU</h2>
+      <input type="text" id="searchInput" placeholder="Enter Product Code / SKU">
+      <button onclick="searchSku()">Search</button>
+    </div>
+
+    <div class="card result-card" id="resultBox">
+      <h2>Result</h2>
+      <p>Search result will appear here.</p>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

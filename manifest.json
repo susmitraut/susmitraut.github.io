@@ -1,0 +1,9 @@
+{
+  "name": "Havells Price Finder",
+  "short_name": "Price Finder",
+  "start_url": "index.html",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#d71920",
+  "icons": []
+}
