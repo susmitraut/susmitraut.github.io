@@ -1,57 +1,74 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <title>Havells Price Finder</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta charset="UTF-8" />
 
-  <link rel="manifest" href="manifest.json">
-  <link rel="stylesheet" href="style.css">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
-  <!-- SheetJS library for reading Excel -->
-  <script src="libs/xlsx.full.min.js"></script>
+  <title>Excel Price List Search</title>
+
+  <link rel="stylesheet" href="style.css" />
+  <link rel="manifest" href="manifest.json" />
+
+  <meta name="theme-color" content="#ffffff" />
 </head>
 
 <body>
-  <div class="app">
-    <h1>Price Finder</h1>
-    <p class="subtitle">Search Product Code and get List Price</p>
+  <main class="app">
+    <h1>Excel Price List Search</h1>
+    <p class="subtitle">
+      Upload an Excel file, search any column, and view the full row details.
+    </p>
 
-    <div class="card">
-      <h2>1. Import Price List</h2>
-      <input type="file" id="excelFile" accept=".xlsx,.xls">
-      <p id="importStatus">No file imported yet.</p>
-    </div>
+    <section class="card">
+      <label for="excelFile">Upload Excel File (.xlsx only)</label>
+      <input type="file" id="excelFile" accept=".xlsx" />
+    </section>
 
-    <div class="card hidden" id="mappingSection">
-      <h2>2. Map Excel Columns</h2>
+    <section class="card hidden" id="controlsSection">
+      <label for="sheetSelect">Select Sheet</label>
+      <select id="sheetSelect"></select>
 
-      <label>Product Code / SKU Column</label>
-      <select id="productCodeSelect"></select>
+      <label for="searchInput">Search</label>
+      <input
+        type="text"
+        id="searchInput"
+        placeholder="Search product code, name, price, brand..."
+      />
 
-      <label>List Price Column</label>
-      <select id="priceSelect"></select>
+      <label for="columnSelect">Search In</label>
+      <select id="columnSelect">
+        <option value="__ALL__">All columns</option>
+      </select>
 
-      <label>Product Name Column Optional</label>
-      <select id="productNameSelect"></select>
+      <button id="downloadCsvBtn">Download Filtered Results CSV</button>
+    </section>
 
-      <button onclick="confirmColumnMapping()">Confirm Import</button>
+    <section class="card hidden" id="statusSection">
+      <p id="statusText"></p>
+    </section>
 
-      <h3>Preview</h3>
-      <div id="previewBox"></div>
-    </div>
+    <section class="card hidden" id="resultsSection">
+      <h2>Results</h2>
+      <div class="table-wrapper">
+        <table id="resultsTable"></table>
+      </div>
+    </section>
 
-    <div class="card">
-      <h2>3. Search SKU</h2>
-      <input type="text" id="searchInput" placeholder="Enter Product Code / SKU">
-      <button onclick="searchSku()">Search</button>
-    </div>
+    <section class="card hidden" id="detailsSection">
+      <h2>Row Details</h2>
+      <p class="subtitle">Click any result row to see full information.</p>
+      <div id="rowDetails"></div>
+    </section>
+  </main>
 
-    <div class="card result-card" id="resultBox">
-      <h2>Result</h2>
-      <p>Search result will appear here.</p>
-    </div>
-  </div>
-
+  <script src="xlsx.full.min.js"></script>
   <script src="app.js"></script>
+
+  <script>
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("service-worker.js");
+    }
+  </script>
 </body>
 </html>
