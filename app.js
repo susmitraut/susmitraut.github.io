@@ -49,13 +49,45 @@ function handleExcelUpload(event) {
     pendingFileName = file.name;
     pendingHeaders = Object.keys(rows[0]);
 
+    saveExcelDataForFutureMapping();
+
     showColumnMappingScreen();
   };
 
   reader.readAsArrayBuffer(file);
 }
 
+function saveExcelDataForFutureMapping() {
+  try {
+    localStorage.setItem("lastExcelRowsForMapping", JSON.stringify(pendingRows));
+    localStorage.setItem("lastExcelHeadersForMapping", JSON.stringify(pendingHeaders));
+    localStorage.setItem("lastExcelFileNameForMapping", pendingFileName);
+  } catch (error) {
+    alert("Excel file is too large to save for future mapping. You may need to upload it again next time.");
+  }
+}
+
+function loadExcelDataForFutureMapping() {
+  const savedRows = localStorage.getItem("lastExcelRowsForMapping");
+  const savedHeaders = localStorage.getItem("lastExcelHeadersForMapping");
+  const savedFileName = localStorage.getItem("lastExcelFileNameForMapping");
+
+  if (savedRows && savedHeaders) {
+    pendingRows = JSON.parse(savedRows);
+    pendingHeaders = JSON.parse(savedHeaders);
+    pendingFileName = savedFileName || "Previous Excel File";
+
+    showColumnMappingScreen();
+
+    return true;
+  }
+
+  return false;
+}
+
 function showColumnMappingScreen() {
+  const mappingSection = document.getElementById("mappingSection");
+
   const productCodeSelect = document.getElementById("productCodeSelect");
   const priceSelect = document.getElementById("priceSelect");
   const productNameSelect = document.getElementById("productNameSelect");
@@ -78,7 +110,9 @@ function showColumnMappingScreen() {
     "lp",
     "price",
     "mrp",
-    "basic price"
+    "basic price",
+    "rate",
+    "selling price"
   ]);
 
   const productNameAuto = findColumn(pendingHeaders, [
@@ -86,7 +120,8 @@ function showColumnMappingScreen() {
     "item name",
     "description",
     "sku description",
-    "material description"
+    "material description",
+    "item description"
   ]);
 
   addDefaultOption(productCodeSelect, "Select Product Code column");
@@ -99,22 +134,32 @@ function showColumnMappingScreen() {
     addOption(productNameSelect, header);
   });
 
-  if (productCodeAuto) {
+  const savedProductCodeColumn = localStorage.getItem("lastProductCodeColumn");
+  const savedPriceColumn = localStorage.getItem("lastPriceColumn");
+  const savedProductNameColumn = localStorage.getItem("lastProductNameColumn");
+
+  if (savedProductCodeColumn && pendingHeaders.includes(savedProductCodeColumn)) {
+    productCodeSelect.value = savedProductCodeColumn;
+  } else if (productCodeAuto) {
     productCodeSelect.value = productCodeAuto;
   }
 
-  if (priceAuto) {
+  if (savedPriceColumn && pendingHeaders.includes(savedPriceColumn)) {
+    priceSelect.value = savedPriceColumn;
+  } else if (priceAuto) {
     priceSelect.value = priceAuto;
   }
 
-  if (productNameAuto) {
+  if (savedProductNameColumn && pendingHeaders.includes(savedProductNameColumn)) {
+    productNameSelect.value = savedProductNameColumn;
+  } else if (productNameAuto) {
     productNameSelect.value = productNameAuto;
   }
 
-  document.getElementById("mappingSection").classList.remove("hidden");
+  mappingSection.classList.remove("hidden");
 
   document.getElementById("importStatus").innerText =
-    "Excel loaded. Please check column mapping and confirm import.";
+    "Excel loaded: " + pendingFileName + ". Please check column mapping and confirm import.";
 
   showPreview();
 }
@@ -154,7 +199,7 @@ function showPreview() {
   html += "<tr>";
 
   pendingHeaders.forEach(header => {
-    html += `<th>${header}</th>`;
+    html += "<th>" + header + "</th>";
   });
 
   html += "</tr>";
@@ -163,7 +208,7 @@ function showPreview() {
     html += "<tr>";
 
     pendingHeaders.forEach(header => {
-      html += `<td>${row[header]}</td>`;
+      html += "<td>" + row[header] + "</td>";
     });
 
     html += "</tr>";
@@ -188,6 +233,10 @@ function confirmColumnMapping() {
     alert("Please select the List Price column.");
     return;
   }
+
+  localStorage.setItem("lastProductCodeColumn", productCodeColumn);
+  localStorage.setItem("lastPriceColumn", priceColumn);
+  localStorage.setItem("lastProductNameColumn", productNameColumn);
 
   importRows(productCodeColumn, priceColumn, productNameColumn);
 }
@@ -229,7 +278,7 @@ function importRows(productCodeColumn, priceColumn, productNameColumn) {
     skuDatabase.push({
       productCodeOriginal: String(productCode).trim(),
       productCodeNormalized: normalizedCode,
-      productName: productName,
+      productName: String(productName || "").trim(),
       listPrice: cleanedPrice
     });
   });
@@ -237,12 +286,15 @@ function importRows(productCodeColumn, priceColumn, productNameColumn) {
   localStorage.setItem("skuDatabase", JSON.stringify(skuDatabase));
   localStorage.setItem("importFileName", pendingFileName);
 
-  document.getElementById("mappingSection").classList.add("hidden");
+  document.getElementById("mappingSection").classList.remove("hidden");
 
   document.getElementById("importStatus").innerText =
-    `Imported ${skuDatabase.length} SKUs from ${pendingFileName}. Skipped ${skippedRows} blank rows, ${invalidPriceRows} invalid price rows, ${duplicateRows} duplicate rows.`;
+    "Imported " + skuDatabase.length + " SKUs from " + pendingFileName +
+    ". Skipped " + skippedRows + " blank rows, " +
+    invalidPriceRows + " invalid price rows, " +
+    duplicateRows + " duplicate rows.";
 
-  alert("Price list imported successfully.");
+  alert("Price list imported successfully. Dropdown will remain visible.");
 }
 
 function searchSku() {
@@ -262,17 +314,15 @@ function searchSku() {
   const resultBox = document.getElementById("resultBox");
 
   if (result) {
-    resultBox.innerHTML = `
-      <h2>Product Found</h2>
-      <p><strong>Product Code:</strong> ${result.productCodeOriginal}</p>
-      <p><strong>Product Name:</strong> ${result.productName || "Not available"}</p>
-      <p><strong>List Price:</strong> ₹${result.listPrice}</p>
-    `;
+    resultBox.innerHTML =
+      "<h2>Product Found</h2>" +
+      "<p><strong>Product Code:</strong> " + result.productCodeOriginal + "</p>" +
+      "<p><strong>Product Name:</strong> " + (result.productName || "Not available") + "</p>" +
+      "<p><strong>List Price:</strong> ₹" + result.listPrice + "</p>";
   } else {
-    resultBox.innerHTML = `
-      <h2>No Exact Match Found</h2>
-      <p>Please check the Product Code or import the latest price list.</p>
-    `;
+    resultBox.innerHTML =
+      "<h2>No Exact Match Found</h2>" +
+      "<p>Please check the Product Code or import the latest price list.</p>";
   }
 }
 
@@ -284,7 +334,14 @@ window.onload = function() {
     skuDatabase = JSON.parse(savedData);
 
     document.getElementById("importStatus").innerText =
-      `Loaded ${skuDatabase.length} SKUs from ${fileName}.`;
+      "Loaded " + skuDatabase.length + " SKUs from " + fileName + ".";
+  }
+
+  const mappingLoaded = loadExcelDataForFutureMapping();
+
+  if (!mappingLoaded) {
+    document.getElementById("importStatus").innerText =
+      "No Excel file loaded yet. Please upload a price list.";
   }
 };
 
