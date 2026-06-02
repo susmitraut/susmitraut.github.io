@@ -1,133 +1,180 @@
-let skuDatabase = [];
+let workbook = null;
+let currentRows = [];
+let currentHeaders = [];
+let filteredRows = [];
 
-let pendingRows = [];
-let pendingFileName = "";
-let pendingHeaders = [];
+const excelFileInput = document.getElementById("excelFile");
+const sheetSelect = document.getElementById("sheetSelect");
+const searchInput = document.getElementById("searchInput");
+const columnSelect = document.getElementById("columnSelect");
+const downloadCsvBtn = document.getElementById("downloadCsvBtn");
 
-document.getElementById("excelFile").addEventListener("change", handleExcelUpload);
+const controlsSection = document.getElementById("controlsSection");
+const statusSection = document.getElementById("statusSection");
+const statusText = document.getElementById("statusText");
+const resultsSection = document.getElementById("resultsSection");
+const detailsSection = document.getElementById("detailsSection");
 
-function normalizeCode(code) {
-  return String(code || "")
-    .trim()
-    .toUpperCase()
-    .replace(/\s+/g, "");
+const resultsTable = document.getElementById("resultsTable");
+const rowDetails = document.getElementById("rowDetails");
+
+/*
+  Upload flow:
+  User selects an .xlsx file.
+  File is read locally in the browser.
+  Nothing is uploaded to a server.
+*/
+excelFileInput.addEventListener("change", handleFileUpload);
+
+sheetSelect.addEventListener("change", () => {
+  loadSelectedSheet();
+  runSearch();
+});
+
+searchInput.addEventListener("input", runSearch);
+columnSelect.addEventListener("change", runSearch);
+downloadCsvBtn.addEventListener("click", downloadFilteredCsv);
+
+function showStatus(message) {
+  statusSection.classList.remove("hidden");
+  statusText.textContent = message;
 }
 
-function cleanPrice(price) {
-  return String(price || "")
-    .replace("₹", "")
-    .replace(/,/g, "")
-    .trim();
+function hideStatus() {
+  statusSection.classList.add("hidden");
+  statusText.textContent = "";
 }
 
-function escapeHTML(value) {
-  return String(value || "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
-}
-
-function handleExcelUpload(event) {
+function handleFileUpload(event) {
   const file = event.target.files[0];
 
-  if (!file) {
-    alert("Please select an Excel file.");
+  if (!file) return;
+
+  if (!file.name.toLowerCase().endsWith(".xlsx")) {
+    showStatus("Please upload only a .xlsx Excel file.");
     return;
   }
 
   const reader = new FileReader();
 
-  reader.onload = function(e) {
-    const data = new Uint8Array(e.target.result);
+  reader.onload = function (e) {
+    try {
+      const data = new Uint8Array(e.target.result);
 
-    const workbook = XLSX.read(data, { type: "array" });
+      /*
+        SheetJS reads the Excel workbook locally.
+        workbook.SheetNames gives all available sheets.
+      */
+      workbook = XLSX.read(data, { type: "array" });
 
-    const firstSheetName = workbook.SheetNames[0];
-    const worksheet = workbook.Sheets[firstSheetName];
+      populateSheetDropdown(workbook.SheetNames);
 
-    const sheetRows = XLSX.utils.sheet_to_json(worksheet, {
-      header: 1,
-      defval: "",
-      raw: false
-    });
+      controlsSection.classList.remove("hidden");
+      resultsSection.classList.remove("hidden");
+      detailsSection.classList.remove("hidden");
 
-    if (sheetRows.length === 0) {
-      alert("Excel file is empty.");
-      return;
+      loadSelectedSheet();
+      runSearch();
+
+      showStatus("Excel file loaded successfully.");
+    } catch (error) {
+      console.error(error);
+      showStatus("Could not read this Excel file. Please check the file format.");
     }
+  };
 
-    const headerRowIndex = findHeaderRowIndex(sheetRows);
-    const headerRow = sheetRows[headerRowIndex];
-
-    pendingHeaders = makeUniqueHeaders(headerRow);
-
-    const dataRows = sheetRows
-      .slice(headerRowIndex + 1)
-      .filter(row => row.some(cell => String(cell).trim() !== ""));
-
-    pendingRows = dataRows.map(row => convertArrayRowToObject(row, pendingHeaders));
-
-    if (pendingRows.length === 0) {
-      alert("No product rows found after the header row.");
-      return;
-    }
-
-    pendingFileName = file.name;
-
-    saveExcelDataForFutureMapping();
-
-    showColumnMappingScreen();
+  reader.onerror = function () {
+    showStatus("Error reading file.");
   };
 
   reader.readAsArrayBuffer(file);
 }
 
-function findHeaderRowIndex(sheetRows) {
-  const knownHeaderWords = [
-    "product code",
-    "sku",
-    "sku code",
-    "item code",
-    "material code",
-    "code",
-    "list price",
-    "price",
-    "mrp",
-    "product name",
-    "description",
-    "item name"
-  ];
+function populateSheetDropdown(sheetNames) {
+  sheetSelect.innerHTML = "";
 
-  let bestIndex = 0;
-  let bestScore = -1;
+  sheetNames.forEach((sheetName) => {
+    const option = document.createElement("option");
+    option.value = sheetName;
+    option.textContent = sheetName;
+    sheetSelect.appendChild(option);
+  });
+}
 
-  const maxRowsToCheck = Math.min(sheetRows.length, 15);
+/*
+  Sheet loading:
+  Converts selected Excel sheet into a 2D array.
+  Then detects the best header row and creates row objects.
+*/
+function loadSelectedSheet() {
+  const sheetName = sheetSelect.value;
+  const worksheet = workbook.Sheets[sheetName];
 
-  for (let i = 0; i < maxRowsToCheck; i++) {
-    const row = sheetRows[i];
+  const rawData = XLSX.utils.sheet_to_json(worksheet, {
+    header: 1,
+    defval: "",
+    raw: false
+  });
 
-    const nonEmptyCells = row.filter(cell => String(cell).trim() !== "").length;
+  const cleanedData = removeEmptyRows(rawData);
 
-    if (nonEmptyCells < 2) {
-      continue;
-    }
+  if (cleanedData.length === 0) {
+    currentRows = [];
+    currentHeaders = [];
+    populateColumnDropdown();
+    return;
+  }
 
-    let knownMatchCount = 0;
+  const headerIndex = detectHeaderRow(cleanedData);
+  currentHeaders = makeUniqueHeaders(cleanedData[headerIndex]);
 
-    row.forEach(cell => {
-      const cellText = String(cell).toLowerCase().trim();
+  const dataRows = cleanedData.slice(headerIndex + 1);
 
-      if (knownHeaderWords.includes(cellText)) {
-        knownMatchCount++;
-      }
+  currentRows = dataRows
+    .filter((row) => !isRowEmpty(row))
+    .map((row, index) => {
+      const obj = {};
+
+      obj["Excel Row"] = headerIndex + index + 2;
+
+      currentHeaders.forEach((header, colIndex) => {
+        obj[header] = row[colIndex] ?? "";
+      });
+
+      return obj;
     });
 
-    const score = knownMatchCount * 10 + nonEmptyCells;
+  populateColumnDropdown();
+  clearRowDetails();
+}
 
-    if (score > bestScore) {
-      bestScore = score;
+/*
+  Removes fully empty rows.
+*/
+function removeEmptyRows(rows) {
+  return rows.filter((row) => !isRowEmpty(row));
+}
+
+function isRowEmpty(row) {
+  return row.every((cell) => String(cell ?? "").trim() === "");
+}
+
+/*
+  Header detection:
+  Your assumption says columns are in the first row.
+  But many real price lists have a title row first.
+  So this chooses the row with the most filled cells among the first 10 rows.
+*/
+function detectHeaderRow(rows) {
+  const maxScan = Math.min(rows.length, 10);
+  let bestIndex = 0;
+  let bestCount = 0;
+
+  for (let i = 0; i < maxScan; i++) {
+    const count = rows[i].filter((cell) => String(cell ?? "").trim() !== "").length;
+
+    if (count > bestCount) {
+      bestCount = count;
       bestIndex = i;
     }
   }
@@ -135,364 +182,220 @@ function findHeaderRowIndex(sheetRows) {
   return bestIndex;
 }
 
+/*
+  Creates safe unique column names.
+  Handles blank headers and duplicate headers.
+*/
 function makeUniqueHeaders(headerRow) {
   const headers = [];
-  const usedHeaders = {};
+  const seen = {};
 
   headerRow.forEach((cell, index) => {
-    let header = String(cell || "").trim();
+    let base = String(cell ?? "").trim();
 
-    if (!header) {
-      header = "Column " + (index + 1);
+    if (!base) {
+      base = `Column ${index + 1}`;
     }
 
-    if (usedHeaders[header]) {
-      usedHeaders[header]++;
-      header = header + " (" + usedHeaders[header] + ")";
+    if (seen[base]) {
+      seen[base] += 1;
+      headers.push(`${base}_${seen[base]}`);
     } else {
-      usedHeaders[header] = 1;
+      seen[base] = 1;
+      headers.push(base);
     }
-
-    headers.push(header);
   });
 
   return headers;
 }
 
-function convertArrayRowToObject(row, headers) {
-  const obj = {};
+function populateColumnDropdown() {
+  columnSelect.innerHTML = "";
 
-  headers.forEach((header, index) => {
-    obj[header] = row[index] !== undefined ? row[index] : "";
+  const allOption = document.createElement("option");
+  allOption.value = "__ALL__";
+  allOption.textContent = "All columns";
+  columnSelect.appendChild(allOption);
+
+  const allHeaders = ["Excel Row", ...currentHeaders];
+
+  allHeaders.forEach((header) => {
+    const option = document.createElement("option");
+    option.value = header;
+    option.textContent = header;
+    columnSelect.appendChild(option);
   });
-
-  return obj;
 }
 
-function saveExcelDataForFutureMapping() {
-  try {
-    localStorage.setItem("lastExcelRowsForMapping", JSON.stringify(pendingRows));
-    localStorage.setItem("lastExcelHeadersForMapping", JSON.stringify(pendingHeaders));
-    localStorage.setItem("lastExcelFileNameForMapping", pendingFileName);
-  } catch (error) {
-    alert("Excel file has too much data to save locally. You can still use it now, but may need to upload again next time.");
-  }
-}
+/*
+  Search logic:
+  - Case-insensitive
+  - Partial match
+  - Can search all columns or selected column
+*/
+function runSearch() {
+  const query = searchInput.value.trim().toLowerCase();
+  const selectedColumn = columnSelect.value;
 
-function loadExcelDataForFutureMapping() {
-  const savedRows = localStorage.getItem("lastExcelRowsForMapping");
-  const savedHeaders = localStorage.getItem("lastExcelHeadersForMapping");
-  const savedFileName = localStorage.getItem("lastExcelFileNameForMapping");
+  clearRowDetails();
 
-  if (savedRows && savedHeaders) {
-    try {
-      pendingRows = JSON.parse(savedRows);
-      pendingHeaders = JSON.parse(savedHeaders);
-      pendingFileName = savedFileName || "Previous Excel File";
-
-      showColumnMappingScreen();
-
-      return true;
-    } catch (error) {
-      return false;
-    }
-  }
-
-  return false;
-}
-
-function showColumnMappingScreen() {
-  const mappingSection = document.getElementById("mappingSection");
-
-  const productCodeSelect = document.getElementById("productCodeSelect");
-  const priceSelect = document.getElementById("priceSelect");
-  const productNameSelect = document.getElementById("productNameSelect");
-
-  productCodeSelect.innerHTML = "";
-  priceSelect.innerHTML = "";
-  productNameSelect.innerHTML = "";
-
-  const productCodeAuto = findColumn(pendingHeaders, [
-    "product code",
-    "sku",
-    "sku code",
-    "item code",
-    "material code",
-    "code"
-  ]);
-
-  const priceAuto = findColumn(pendingHeaders, [
-    "list price",
-    "lp",
-    "price",
-    "mrp",
-    "basic price",
-    "rate",
-    "selling price"
-  ]);
-
-  const productNameAuto = findColumn(pendingHeaders, [
-    "product name",
-    "item name",
-    "description",
-    "sku description",
-    "material description",
-    "item description"
-  ]);
-
-  addDefaultOption(productCodeSelect, "Select Product Code column");
-  addDefaultOption(priceSelect, "Select List Price column");
-  addDefaultOption(productNameSelect, "No Product Name column");
-
-  pendingHeaders.forEach(header => {
-    addOption(productCodeSelect, header);
-    addOption(priceSelect, header);
-    addOption(productNameSelect, header);
-  });
-
-  const savedProductCodeColumn = localStorage.getItem("lastProductCodeColumn");
-  const savedPriceColumn = localStorage.getItem("lastPriceColumn");
-  const savedProductNameColumn = localStorage.getItem("lastProductNameColumn");
-
-  if (savedProductCodeColumn && pendingHeaders.includes(savedProductCodeColumn)) {
-    productCodeSelect.value = savedProductCodeColumn;
-  } else if (productCodeAuto) {
-    productCodeSelect.value = productCodeAuto;
-  }
-
-  if (savedPriceColumn && pendingHeaders.includes(savedPriceColumn)) {
-    priceSelect.value = savedPriceColumn;
-  } else if (priceAuto) {
-    priceSelect.value = priceAuto;
-  }
-
-  if (savedProductNameColumn && pendingHeaders.includes(savedProductNameColumn)) {
-    productNameSelect.value = savedProductNameColumn;
-  } else if (productNameAuto) {
-    productNameSelect.value = productNameAuto;
-  }
-
-  mappingSection.classList.remove("hidden");
-
-  document.getElementById("importStatus").innerText =
-    "Excel loaded: " + pendingFileName + ". Please check column mapping and confirm import.";
-
-  showPreview();
-}
-
-function addDefaultOption(selectElement, text) {
-  const option = document.createElement("option");
-  option.value = "";
-  option.textContent = text;
-  selectElement.appendChild(option);
-}
-
-function addOption(selectElement, value) {
-  const option = document.createElement("option");
-  option.value = value;
-  option.textContent = value;
-  selectElement.appendChild(option);
-}
-
-function findColumn(headers, possibleNames) {
-  for (const header of headers) {
-    const cleanedHeader = header.toLowerCase().trim();
-
-    if (possibleNames.includes(cleanedHeader)) {
-      return header;
-    }
-  }
-
-  return null;
-}
-
-function showPreview() {
-  const previewBox = document.getElementById("previewBox");
-
-  const firstFiveRows = pendingRows.slice(0, 5);
-
-  let html = "<div class='table-scroll'>";
-  html += "<table class='preview-table'>";
-  html += "<tr>";
-
-  pendingHeaders.forEach(header => {
-    html += "<th>" + escapeHTML(header) + "</th>";
-  });
-
-  html += "</tr>";
-
-  firstFiveRows.forEach(row => {
-    html += "<tr>";
-
-    pendingHeaders.forEach(header => {
-      html += "<td>" + escapeHTML(row[header]) + "</td>";
-    });
-
-    html += "</tr>";
-  });
-
-  html += "</table>";
-  html += "</div>";
-
-  previewBox.innerHTML = html;
-}
-
-function confirmColumnMapping() {
-  const productCodeColumn = document.getElementById("productCodeSelect").value;
-  const priceColumn = document.getElementById("priceSelect").value;
-  const productNameColumn = document.getElementById("productNameSelect").value;
-
-  if (!productCodeColumn) {
-    alert("Please select the Product Code / SKU column.");
-    return;
-  }
-
-  if (!priceColumn) {
-    alert("Please select the List Price column.");
-    return;
-  }
-
-  localStorage.setItem("lastProductCodeColumn", productCodeColumn);
-  localStorage.setItem("lastPriceColumn", priceColumn);
-  localStorage.setItem("lastProductNameColumn", productNameColumn);
-
-  importRows(productCodeColumn, priceColumn, productNameColumn);
-}
-
-function importRows(productCodeColumn, priceColumn, productNameColumn) {
-  skuDatabase = [];
-
-  let skippedRows = 0;
-  let invalidPriceRows = 0;
-  let duplicateRows = 0;
-
-  const seenCodes = {};
-
-  pendingRows.forEach(row => {
-    const productCode = row[productCodeColumn];
-    const listPrice = row[priceColumn];
-    const productName = productNameColumn ? row[productNameColumn] : "";
-
-    if (!productCode || !listPrice) {
-      skippedRows++;
-      return;
-    }
-
-    const normalizedCode = normalizeCode(productCode);
-    const cleanedPrice = cleanPrice(listPrice);
-
-    if (isNaN(Number(cleanedPrice))) {
-      invalidPriceRows++;
-      return;
-    }
-
-    if (seenCodes[normalizedCode]) {
-      duplicateRows++;
-      return;
-    }
-
-    seenCodes[normalizedCode] = true;
-
-    skuDatabase.push({
-      productCodeOriginal: String(productCode).trim(),
-      productCodeNormalized: normalizedCode,
-      productName: String(productName || "").trim(),
-      listPrice: cleanedPrice,
-      allProductDetails: row
-    });
-  });
-
-  localStorage.setItem("skuDatabase", JSON.stringify(skuDatabase));
-  localStorage.setItem("importFileName", pendingFileName);
-
-  document.getElementById("mappingSection").classList.remove("hidden");
-
-  document.getElementById("importStatus").innerText =
-    "Imported " + skuDatabase.length + " SKUs from " + pendingFileName +
-    ". Skipped " + skippedRows + " blank rows, " +
-    invalidPriceRows + " invalid price rows, " +
-    duplicateRows + " duplicate rows.";
-
-  alert("Price list imported successfully. All product columns will now show in search result.");
-}
-
-function searchSku() {
-  const input = document.getElementById("searchInput").value;
-
-  if (!input.trim()) {
-    alert("Please enter Product Code / SKU.");
-    return;
-  }
-
-  const normalizedInput = normalizeCode(input);
-
-  const result = skuDatabase.find(item =>
-    item.productCodeNormalized === normalizedInput
-  );
-
-  const resultBox = document.getElementById("resultBox");
-
-  if (result) {
-    resultBox.innerHTML =
-      "<h2>Product Found</h2>" +
-      "<p><strong>Product Code:</strong> " + escapeHTML(result.productCodeOriginal) + "</p>" +
-      "<p><strong>Product Name:</strong> " + escapeHTML(result.productName || "Not available") + "</p>" +
-      "<p><strong>List Price:</strong> ₹" + escapeHTML(result.listPrice) + "</p>" +
-      "<h3>All Product Details</h3>" +
-      createProductDetailsTable(result.allProductDetails);
+  if (!query) {
+    filteredRows = [...currentRows];
   } else {
-    resultBox.innerHTML =
-      "<h2>No Exact Match Found</h2>" +
-      "<p>Please check the Product Code or import the latest price list.</p>";
+    filteredRows = currentRows.filter((row) => {
+      if (selectedColumn === "__ALL__") {
+        return Object.values(row).some((value) =>
+          String(value ?? "").toLowerCase().includes(query)
+        );
+      }
+
+      return String(row[selectedColumn] ?? "").toLowerCase().includes(query);
+    });
+  }
+
+  renderResultsTable();
+
+  if (filteredRows.length === 0) {
+    showStatus("No results found. Try another product code, name, price, or column.");
+  } else {
+    showStatus(`Found ${filteredRows.length} matching row(s).`);
   }
 }
 
-function createProductDetailsTable(productDetails) {
-  if (!productDetails) {
-    return "<p>No extra details available.</p>";
+/*
+  Results table:
+  Shows all matching rows.
+  Clicking a row opens full row details.
+*/
+function renderResultsTable() {
+  resultsTable.innerHTML = "";
+
+  if (filteredRows.length === 0) {
+    return;
   }
 
-  let html = "<div class='details-table-box'>";
-  html += "<table class='details-table'>";
+  const headers = Object.keys(filteredRows[0]);
 
-  Object.keys(productDetails).forEach(key => {
-    const value = productDetails[key];
+  const thead = document.createElement("thead");
+  const headerTr = document.createElement("tr");
 
-    html += "<tr>";
-    html += "<th>" + escapeHTML(key) + "</th>";
-    html += "<td>" + escapeHTML(value || "-") + "</td>";
-    html += "</tr>";
+  headers.forEach((header) => {
+    const th = document.createElement("th");
+    th.textContent = header;
+    headerTr.appendChild(th);
   });
 
-  html += "</table>";
-  html += "</div>";
+  thead.appendChild(headerTr);
+  resultsTable.appendChild(thead);
 
-  return html;
+  const tbody = document.createElement("tbody");
+
+  filteredRows.forEach((row) => {
+    const tr = document.createElement("tr");
+
+    headers.forEach((header) => {
+      const td = document.createElement("td");
+      td.textContent = row[header] ?? "";
+      tr.appendChild(td);
+    });
+
+    tr.addEventListener("click", () => {
+      renderRowDetails(row);
+    });
+
+    tbody.appendChild(tr);
+  });
+
+  resultsTable.appendChild(tbody);
 }
 
-window.onload = function() {
-  const savedData = localStorage.getItem("skuDatabase");
-  const fileName = localStorage.getItem("importFileName");
+/*
+  Row Details:
+  Shows every column and value from selected row.
+  This solves the main problem: user can see data to the left and right
+  of the matched Excel cell.
+*/
+function renderRowDetails(row) {
+  rowDetails.innerHTML = "";
 
-  if (savedData) {
-    try {
-      skuDatabase = JSON.parse(savedData);
+  Object.entries(row).forEach(([key, value]) => {
+    const detailRow = document.createElement("div");
+    detailRow.className = "detail-row";
 
-      document.getElementById("importStatus").innerText =
-        "Loaded " + skuDatabase.length + " SKUs from " + fileName + ".";
-    } catch (error) {
-      skuDatabase = [];
-    }
+    const keyDiv = document.createElement("div");
+    keyDiv.className = "detail-key";
+    keyDiv.textContent = key;
+
+    const valueDiv = document.createElement("div");
+    valueDiv.innerHTML = highlightMatch(String(value ?? ""));
+
+    detailRow.appendChild(keyDiv);
+    detailRow.appendChild(valueDiv);
+
+    rowDetails.appendChild(detailRow);
+  });
+}
+
+function clearRowDetails() {
+  rowDetails.innerHTML = "";
+}
+
+/*
+  Highlight matched text in row details.
+*/
+function highlightMatch(text) {
+  const query = searchInput.value.trim();
+
+  if (!query) {
+    return escapeHtml(text);
   }
 
-  const mappingLoaded = loadExcelDataForFutureMapping();
+  const escapedText = escapeHtml(text);
+  const escapedQuery = escapeRegExp(escapeHtml(query));
 
-  if (!mappingLoaded && !savedData) {
-    document.getElementById("importStatus").innerText =
-      "No Excel file loaded yet. Please upload a price list.";
+  const regex = new RegExp(`(${escapedQuery})`, "gi");
+
+  return escapedText.replace(regex, "<mark>$1</mark>");
+}
+
+function escapeHtml(text) {
+  return text.replace(/[&<>"']/g, function (char) {
+    return {
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#039;"
+    }[char];
+  });
+}
+
+function escapeRegExp(text) {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/*
+  CSV download:
+  Downloads only the filtered search results.
+*/
+function downloadFilteredCsv() {
+  if (filteredRows.length === 0) {
+    showStatus("No filtered results to download.");
+    return;
   }
-};
 
-if ("serviceWorker" in navigator) {
-  navigator.serviceWorker.register("service-worker.js");
+  const worksheet = XLSX.utils.json_to_sheet(filteredRows);
+  const csv = XLSX.utils.sheet_to_csv(worksheet);
+
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "filtered-results.csv";
+  document.body.appendChild(link);
+  link.click();
+
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
 }
